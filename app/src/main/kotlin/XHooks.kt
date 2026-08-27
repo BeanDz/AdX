@@ -1,11 +1,11 @@
 package dev.doji.adx
 
 import io.github.libxposed.api.XposedInterface.ExceptionMode
+import java.lang.reflect.Constructor
 import java.lang.reflect.Field
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicBoolean
+import java.lang.reflect.Modifier
 
-/** Installs the two exact hooks validated for the supported X version. */
+/** Installs the exact data hook validated for the supported X version. */
 internal class XHooks(
     private val module: AdXModule,
     private val loader: ClassLoader,
@@ -17,36 +17,71 @@ internal class XHooks(
         val immutableListClass = loader.resolve(names.IMMUTABLE_LIST)
         val moduleClass = loader.resolve(names.MODULE)
         val moduleItemClass = loader.resolve(names.MODULE_ITEM)
+        val promotedMetadataClass = loader.resolve(names.PROMOTED_METADATA)
+        val rtbImageAdClass = loader.resolve(names.RTB_IMAGE_AD)
 
-        val stateConstructor = stateClass.getDeclaredConstructor(
-            loader.resolve(names.TYPE),
-            immutableListClass,
-            loader.resolve(names.REFRESH_STATE),
-            java.lang.Boolean.TYPE,
-            java.lang.Boolean.TYPE,
-        ).accessible()
-        val immutableAdapter = loader.resolve(names.IMMUTABLE_ADAPTER)
-            .getDeclaredConstructor(List::class.java)
-            .accessible()
-        val moduleCopy = moduleClass.declaredMethods.singleOrNull {
-            it.name == "copy\$default" && it.parameterCount == MODULE_COPY_PARAMETER_COUNT
-        }?.accessible() ?: throw NoSuchMethodException("${names.MODULE}.copy\$default")
+        val stateConstructor =
+            stateClass
+                .getDeclaredConstructor(
+                    loader.resolve(names.TYPE),
+                    immutableListClass,
+                    loader.resolve(names.REFRESH_STATE),
+                    java.lang.Boolean.TYPE,
+                    java.lang.Boolean.TYPE,
+                ).accessible()
+        val immutableAdapter =
+            loader
+                .resolve(names.IMMUTABLE_ADAPTER)
+                .getDeclaredConstructor(List::class.java)
+                .accessible()
+        val moduleFields =
+            moduleClass.declaredFields
+                .filterNot { Modifier.isStatic(it.modifiers) }
+                .map(Field::accessible)
+        val moduleCopy =
+            moduleClass.declaredConstructors
+                .mapNotNull { constructor ->
+                    constructor.mapFields(moduleFields)?.let { fields ->
+                        constructor.accessible() to fields
+                    }
+                }.singleOrNull() ?: throw NoSuchMethodException("${names.MODULE} data constructor")
+        val moduleConstructor = moduleCopy.first
+        val moduleConstructorFields = moduleCopy.second
+        val moduleContent =
+            moduleConstructorFields.firstOrNull {
+                List::class.java.isAssignableFrom(it.type)
+            } ?: throw NoSuchFieldException("${names.MODULE} content")
+        val moduleItemValue =
+            moduleItemClass.fieldOfType(itemClass)
+                ?: throw NoSuchFieldException("${names.MODULE_ITEM} item")
 
-        val filter = TimelineFilter(
-            itemClass = itemClass,
-            moduleClass = moduleClass,
-            moduleContent = moduleClass.getMethod("getInnerContent"),
-            moduleItemValue = moduleItemClass.getMethod("getItem"),
-            moduleCopy = moduleCopy,
-            warn = module::warn,
-        )
+        val filter =
+            TimelineFilter(
+                itemClass = itemClass,
+                promotedMetadataClass = promotedMetadataClass,
+                rtbImageAdClass = rtbImageAdClass,
+                moduleClass = moduleClass,
+                moduleContent = moduleContent,
+                moduleItemValue = moduleItemValue,
+                copyModule = { module, content ->
+                    moduleConstructor.newInstance(
+                        *moduleConstructorFields
+                            .map { field ->
+                                if (field === moduleContent) content else field.get(module)
+                            }.toTypedArray(),
+                    )
+                },
+                warn = module::warn,
+            )
 
-        module.hook(stateConstructor)
+        module
+            .hook(stateConstructor)
             .setId("x-urt-promoted-state-filter")
             .setExceptionMode(ExceptionMode.PROTECTIVE)
             .intercept { chain ->
-                val source = chain.getArg(1) as? List<*>
-                    ?: return@intercept chain.proceed()
+                val source =
+                    chain.getArg(1) as? List<*>
+                        ?: return@intercept chain.proceed()
                 if (source.isEmpty()) return@intercept chain.proceed()
 
                 val result = filter.filter(source)
@@ -63,55 +98,13 @@ internal class XHooks(
 
         module.info("Installed URT data hook: $stateConstructor")
     }
+}
 
-    fun installRenderGuard() {
-        val names = XTarget.Renderer
-        val promotedMetadataClass = loader.resolve(names.PROMOTED_METADATA)
-        val renderer = loader.resolve(names.OWNER).getDeclaredMethod(
-            names.METHOD,
-            loader.resolve(names.STATE),
-            loader.resolve(names.MODIFIER),
-            loader.resolve(names.LAYOUT_STATE),
-            loader.resolve(names.CONTENT_INSETS),
-            loader.resolve(names.COMPOSER),
-            Integer.TYPE,
-            Integer.TYPE,
-        ).accessible()
-        val fieldCache = ConcurrentHashMap<Class<*>, FieldLookup>()
-        val observed = AtomicBoolean()
-        val suppressionLogged = AtomicBoolean()
-
-        module.hook(renderer)
-            .setId("x-promoted-post-render-filter")
-            .setExceptionMode(ExceptionMode.PROTECTIVE)
-            .intercept { chain ->
-                if (observed.compareAndSet(false, true)) {
-                    module.info("Observed shared post renderer")
-                }
-
-                val state = chain.getArg(0)
-                val promoted = try {
-                    state != null && fieldCache.computeIfAbsent(state.javaClass) { type ->
-                        FieldLookup(type.fieldOfType(promotedMetadataClass))
-                    }.field?.get(state) != null
-                } catch (error: Throwable) {
-                    module.warn("Post renderer classification failed; rendering item", error)
-                    false
-                }
-
-                if (!promoted) return@intercept chain.proceed()
-                if (suppressionLogged.compareAndSet(false, true)) {
-                    module.info("Suppressed promoted post renderer")
-                }
-                null
-            }
-
-        module.info("Installed promoted-post renderer hook: $renderer")
-    }
-
-    private class FieldLookup(val field: Field?)
-
-    private companion object {
-        const val MODULE_COPY_PARAMETER_COUNT = 10
+private fun Constructor<*>.mapFields(candidates: List<Field>): List<Field>? {
+    val remaining = candidates.toMutableList()
+    return parameterTypes.map { type ->
+        val matches = remaining.filter { field -> field.type === type }
+        if (matches.size != 1) return null
+        matches.single().also(remaining::remove)
     }
 }

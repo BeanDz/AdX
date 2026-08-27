@@ -27,26 +27,32 @@ class AdXModule : XposedModule() {
         }
 
         val hooks = XHooks(this, param.classLoader)
-        val dataHook = installSafely("URT data", hooks::installTimelineFilter)
-        val renderHook = installSafely("post renderer", hooks::installRenderGuard)
-        if (!dataHook && !renderHook) installed.set(false)
+        if (!installSafely("URT data", hooks::installTimelineFilter)) installed.set(false)
     }
 
-    private fun installSafely(name: String, install: () -> Unit): Boolean = try {
-        install()
-        true
-    } catch (error: Throwable) {
-        error("Failed to install $name hook", error)
-        false
-    }
+    private fun installSafely(
+        name: String,
+        install: () -> Unit,
+    ): Boolean =
+        try {
+            install()
+            true
+        } catch (error: Throwable) {
+            error("Failed to install $name hook", error)
+            false
+        }
 
     internal fun info(message: String) = log(Log.INFO, TAG, message)
 
-    internal fun warn(message: String, error: Throwable) =
-        log(Log.WARN, TAG, message, error)
+    internal fun warn(
+        message: String,
+        error: Throwable,
+    ) = log(Log.WARN, TAG, message, error)
 
-    private fun error(message: String, error: Throwable) =
-        log(Log.ERROR, TAG, message, error)
+    private fun error(
+        message: String,
+        error: Throwable,
+    ) = log(Log.ERROR, TAG, message, error)
 
     private companion object {
         const val TAG = "AdX"
