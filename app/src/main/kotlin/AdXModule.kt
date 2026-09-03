@@ -4,11 +4,9 @@ import android.util.Log
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.ModuleLoadedParam
 import io.github.libxposed.api.XposedModuleInterface.PackageReadyParam
-import java.util.concurrent.atomic.AtomicBoolean
 
 /** Removes promoted content from X without modifying the target APK. */
 class AdXModule : XposedModule() {
-    private val installed = AtomicBoolean()
     private var processName = ""
 
     override fun onModuleLoaded(param: ModuleLoadedParam) {
@@ -20,27 +18,17 @@ class AdXModule : XposedModule() {
     override fun onPackageReady(param: PackageReadyParam) {
         if (processName != XTarget.PACKAGE ||
             param.packageName != XTarget.PACKAGE ||
-            !param.isFirstPackage ||
-            !installed.compareAndSet(false, true)
+            !param.isFirstPackage
         ) {
             return
         }
 
-        val hooks = XHooks(this, param.classLoader)
-        if (!installSafely("URT data", hooks::installTimelineFilter)) installed.set(false)
-    }
-
-    private fun installSafely(
-        name: String,
-        install: () -> Unit,
-    ): Boolean =
         try {
-            install()
-            true
+            XHooks(this, param.classLoader).installTimelineFilter()
         } catch (error: Throwable) {
-            error("Failed to install $name hook", error)
-            false
+            error("Failed to install URT data hook", error)
         }
+    }
 
     internal fun info(message: String) = log(Log.INFO, TAG, message)
 

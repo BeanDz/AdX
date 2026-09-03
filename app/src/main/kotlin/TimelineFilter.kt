@@ -1,21 +1,20 @@
 package dev.doji.adx
 
 import java.lang.reflect.Field
-import java.lang.reflect.Modifier
 import java.util.concurrent.ConcurrentHashMap
 
 /** Classifies promoted URT items and removes them from top-level and module lists. */
 internal class TimelineFilter(
     private val itemClass: Class<*>,
     private val promotedMetadataClass: Class<*>,
-    private val rtbImageAdClass: Class<*>,
     private val moduleClass: Class<*>,
+    private val moduleItemClass: Class<*>,
     private val moduleContent: Field,
     private val moduleItemValue: Field,
     private val copyModule: (Any, List<Any?>) -> Any,
     private val warn: (String, Throwable) -> Unit,
 ) {
-    private val inspectors = ConcurrentHashMap<Class<*>, ItemInspector>()
+    private val promotedMetadataReaders = ConcurrentHashMap<Class<*>, (Any) -> Any?>()
 
     fun filter(source: List<*>): Result {
         val output = ArrayList<Any?>(source.size)
@@ -55,7 +54,12 @@ internal class TimelineFilter(
             val output = ArrayList<Any?>(content.size)
             var removed = 0
             for (wrapper in content) {
-                val nested = wrapper?.let(moduleItemValue::get)
+                val nested =
+                    if (wrapper != null && moduleItemClass.isInstance(wrapper)) {
+                        moduleItemValue.get(wrapper)
+                    } else {
+                        null
+                    }
                 if (nested != null && isPromoted(nested)) removed++ else output += wrapper
             }
             if (removed == 0) return ModuleResult(module)
@@ -75,21 +79,18 @@ internal class TimelineFilter(
 
     private fun isPromoted(item: Any): Boolean =
         try {
-            inspectors.computeIfAbsent(item.javaClass, ::createInspector).isPromoted(item)
+            promotedMetadataReaders
+                .computeIfAbsent(item.javaClass, ::createPromotedMetadataReader)
+                .invoke(item) != null
         } catch (error: Throwable) {
             warn("Promoted classification failed for ${item.javaClass.name}; kept item", error)
             false
         }
 
-    private fun createInspector(type: Class<*>): ItemInspector {
-        val direct = type.fieldOfType(promotedMetadataClass)
-        val nested = if (direct == null) type.nestedFieldOfType(promotedMetadataClass) else null
-        return ItemInspector(
-            alwaysPromoted = rtbImageAdClass.isAssignableFrom(type),
-            direct = direct,
-            nested = nested,
-        )
-    }
+    private fun createPromotedMetadataReader(type: Class<*>): (Any) -> Any? =
+        type.fieldOfType(promotedMetadataClass)?.let { field ->
+            { item -> field.get(item) }
+        } ?: { null }
 
     class Result(
         val items: List<Any?>,
@@ -101,34 +102,7 @@ internal class TimelineFilter(
         val removed: Int = 0,
     )
 
-    private class ItemInspector(
-        private val alwaysPromoted: Boolean,
-        private val direct: Field?,
-        private val nested: NestedField?,
-    ) {
-        fun isPromoted(item: Any): Boolean {
-            if (alwaysPromoted || direct?.get(item) != null) return true
-            return nested?.get(item) != null
-        }
-    }
-
-    private class NestedField(
-        private val owner: Field,
-        private val value: Field,
-    ) {
-        fun get(item: Any): Any? = owner.get(item)?.let(value::get)
-    }
-
     private companion object {
         val DROP = Any()
-    }
-
-    private fun Class<*>.nestedFieldOfType(fieldType: Class<*>): NestedField? {
-        for (field in declaredFields) {
-            if (Modifier.isStatic(field.modifiers)) continue
-            val nested = field.type.fieldOfType(fieldType) ?: continue
-            return NestedField(field.accessible(), nested)
-        }
-        return null
     }
 }

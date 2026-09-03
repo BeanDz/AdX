@@ -18,7 +18,6 @@ internal class XHooks(
         val moduleClass = loader.resolve(names.MODULE)
         val moduleItemClass = loader.resolve(names.MODULE_ITEM)
         val promotedMetadataClass = loader.resolve(names.PROMOTED_METADATA)
-        val rtbImageAdClass = loader.resolve(names.RTB_IMAGE_AD)
 
         val stateConstructor =
             stateClass
@@ -59,8 +58,8 @@ internal class XHooks(
             TimelineFilter(
                 itemClass = itemClass,
                 promotedMetadataClass = promotedMetadataClass,
-                rtbImageAdClass = rtbImageAdClass,
                 moduleClass = moduleClass,
+                moduleItemClass = moduleItemClass,
                 moduleContent = moduleContent,
                 moduleItemValue = moduleItemValue,
                 copyModule = { module, content ->
