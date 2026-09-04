@@ -12,21 +12,21 @@ class AdXModule : XposedModule() {
     override fun onModuleLoaded(param: ModuleLoadedParam) {
         processName = param.processName
         info("Loaded in $processName using $frameworkName API $apiVersion")
-        if (processName != XTarget.PACKAGE) detach()
+        if (processName != X1222Binding.PACKAGE) detach()
     }
 
     override fun onPackageReady(param: PackageReadyParam) {
-        if (processName != XTarget.PACKAGE ||
-            param.packageName != XTarget.PACKAGE ||
+        if (processName != X1222Binding.PACKAGE ||
+            param.packageName != X1222Binding.PACKAGE ||
             !param.isFirstPackage
         ) {
             return
         }
 
         try {
-            XHooks(this, param.classLoader).installTimelineFilter()
+            installXTimelineHook(param.classLoader)
         } catch (error: Throwable) {
-            error("Failed to install URT data hook", error)
+            error("Failed to install X 12.22 timeline hook", error)
         }
     }
 
