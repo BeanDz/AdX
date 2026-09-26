@@ -1,5 +1,6 @@
 package dev.doji.adx
 
+import android.os.SystemClock
 import android.util.Log
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.ModuleLoadedParam
@@ -12,21 +13,25 @@ class AdXModule : XposedModule() {
     override fun onModuleLoaded(param: ModuleLoadedParam) {
         processName = param.processName
         info("Loaded in $processName using $frameworkName API $apiVersion")
-        if (processName != X1222Binding.PACKAGE) detach()
+        if (processName != TARGET_PACKAGE) detach()
     }
 
     override fun onPackageReady(param: PackageReadyParam) {
-        if (processName != X1222Binding.PACKAGE ||
-            param.packageName != X1222Binding.PACKAGE ||
+        if (processName != TARGET_PACKAGE ||
+            param.packageName != TARGET_PACKAGE ||
             !param.isFirstPackage
         ) {
             return
         }
 
         try {
-            installXTimelineHook(param.classLoader)
+            val started = SystemClock.elapsedRealtime()
+            val symbols = TimelineDiscovery.discover(param.applicationInfo.sourceDir)
+            val binding = TimelineBinding(param.classLoader, symbols)
+            info("Discovered and validated timeline binding in ${SystemClock.elapsedRealtime() - started} ms")
+            installXTimelineHook(binding)
         } catch (error: Throwable) {
-            error("Failed to install X 12.22 timeline hook", error)
+            error("Timeline binding unavailable; filtering is inactive for this APK", error)
         }
     }
 
@@ -44,5 +49,6 @@ class AdXModule : XposedModule() {
 
     private companion object {
         const val TAG = "AdX"
+        const val TARGET_PACKAGE = "com.twitter.android"
     }
 }

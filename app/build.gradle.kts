@@ -11,8 +11,8 @@ android {
         applicationId = "dev.doji.adx"
         minSdk = 28
         targetSdk = 36
-        versionCode = 9
-        versionName = "0.9.0"
+        versionCode = 13
+        versionName = "0.13.0"
     }
 
     buildTypes {
@@ -46,5 +46,6 @@ kotlin {
 
 dependencies {
     compileOnly("io.github.libxposed:api:102.0.0")
+    implementation("org.luckypray:dexkit:2.2.0")
     implementation("org.jetbrains.kotlin:kotlin-stdlib:2.2.21")
 }

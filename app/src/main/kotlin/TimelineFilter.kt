@@ -2,7 +2,7 @@ package dev.doji.adx
 
 /** Classifies promoted URT items and removes them from top-level and module lists. */
 internal class TimelineFilter(
-    private val binding: X1222Binding,
+    private val binding: TimelineBinding,
     private val warn: (String, Throwable) -> Unit,
 ) {
     fun filter(source: List<*>): Result {
