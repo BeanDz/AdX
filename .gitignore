@@ -1,13 +1,9 @@
-# IDE and local environment
-.idea/
-.kotlin/
+/.gradle/
+/.kotlin/
+/.idea/
+/local.properties
 *.iml
-captures/
-local.properties
 
-# Build outputs
-.gradle/
-**/build/
+build/
 
-# macOS
 .DS_Store

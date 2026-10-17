@@ -1,27 +1,24 @@
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
 }
 
 android {
     namespace = "dev.doji.adx"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "dev.doji.adx"
         minSdk = 28
-        targetSdk = 36
-        versionCode = 13
-        versionName = "0.13.0"
+        targetSdk = 37
+        versionCode = 15
+        versionName = "0.15.0"
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = true
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro",
-            )
+            optimization {
+                enable = true
+            }
         }
     }
 
@@ -29,23 +26,10 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-
-    lint {
-        abortOnError = true
-        checkReleaseBuilds = true
-        // Keep the toolchain aligned with the installed Android Studio release.
-        disable += setOf("AndroidGradlePluginVersion", "NewerVersionAvailable")
-    }
-}
-
-kotlin {
-    compilerOptions {
-        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
-    }
 }
 
 dependencies {
     compileOnly("io.github.libxposed:api:102.0.0")
-    implementation("org.luckypray:dexkit:2.2.0")
-    implementation("org.jetbrains.kotlin:kotlin-stdlib:2.2.21")
+    implementation("org.luckypray:dexkit:2.3.0")
+    testImplementation("junit:junit:4.13.2")
 }

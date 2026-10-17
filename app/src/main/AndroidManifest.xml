@@ -5,5 +5,5 @@
     <application
         android:allowBackup="false"
         android:label="AdX"
-        tools:ignore="DataExtractionRules,MissingApplicationIcon" />
+        tools:ignore="MissingApplicationIcon" />
 </manifest>

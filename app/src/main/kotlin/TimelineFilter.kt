@@ -1,84 +1,60 @@
 package dev.doji.adx
 
-/** Classifies promoted URT items and removes them from top-level and module lists. */
+import java.lang.reflect.Field
+import java.lang.reflect.Method
+import java.lang.reflect.Modifier
+
 internal class TimelineFilter(
-    private val binding: TimelineBinding,
-    private val warn: (String, Throwable) -> Unit,
+    private val moduleClass: Class<*>,
+    moduleItemClass: Class<*>,
+    private val promotedUserClass: Class<*>,
+    private val promotedMetadataMethod: Method,
 ) {
-    fun filter(source: List<*>): Result {
-        val output = ArrayList<Any?>(source.size)
-        var removed = 0
-
-        for (item in source) {
-            if (item == null || !binding.isTimelineItem(item)) {
-                output += item
-                continue
-            }
-
-            if (isPromoted(item)) {
-                removed++
-                continue
-            }
-
-            if (!binding.isTimelineModule(item)) {
-                output += item
-                continue
-            }
-
-            val result = filterModule(item)
-            if (result.item != null) output += result.item
-            removed += result.removed
+    private val moduleItemField =
+        moduleItemClass.instanceFields().single { field ->
+            field.type == promotedMetadataMethod.parameterTypes[0]
         }
-        return Result(output, removed)
+    private val promotedUserMetadataField =
+        promotedUserClass.instanceFields().single { it.type == promotedMetadataMethod.returnType }
+    private val moduleFields = moduleClass.instanceFields()
+    private val moduleContentField = moduleFields.single { it.type == List::class.java }
+    private val moduleConstructor =
+        moduleClass.declaredConstructors
+            .single { constructor ->
+                constructor.parameterTypes.all { type -> moduleFields.any { it.type == type } }
+            }.apply { isAccessible = true }
+    private val moduleConstructorFields =
+        moduleConstructor.parameterTypes.map { type -> moduleFields.single { it.type == type } }
+
+    init {
+        promotedMetadataMethod.isAccessible = true
     }
 
-    private fun filterModule(module: Any): ModuleResult {
-        return try {
-            val content =
-                binding.moduleContent(module)
-                    ?: return ModuleResult(module)
-            if (content.isEmpty()) return ModuleResult(module)
+    fun filter(source: List<*>): List<*> =
+        source.mapNotNull { item ->
+            if (isPromoted(item)) return@mapNotNull null
+            if (!moduleClass.isInstance(item)) return@mapNotNull item
 
-            val output = ArrayList<Any?>(content.size)
-            var removed = 0
-            for (wrapper in content) {
-                val nested = binding.unwrapModuleItem(wrapper)
-                if (nested != null && isPromoted(nested)) {
-                    removed++
-                    continue
-                }
-                output += wrapper
-            }
-            if (removed == 0) return ModuleResult(module)
+            val content = moduleContentField.get(item) as List<*>
+            val filtered = content.filterNot { isPromoted(moduleItemField.get(it)) }
+            if (filtered.size == content.size) return@mapNotNull item
+            if (filtered.isEmpty()) return@mapNotNull null
 
-            val replacement =
-                if (output.isEmpty()) {
-                    null
-                } else {
-                    binding.copyModule(module, output)
-                }
-            ModuleResult(replacement, removed)
-        } catch (error: Exception) {
-            warn("Nested module filter failed; kept module", error)
-            ModuleResult(module)
-        }
-    }
-
-    private fun isPromoted(item: Any): Boolean =
-        try {
-            binding.isPromoted(item)
-        } catch (error: Exception) {
-            warn("Promoted classification failed for ${item.javaClass.name}; kept item", error)
-            false
+            moduleConstructor.newInstance(
+                *moduleConstructorFields
+                    .map { field ->
+                        if (field == moduleContentField) filtered else field.get(item)
+                    }.toTypedArray(),
+            )
         }
 
-    class Result(
-        val items: List<Any?>,
-        val removed: Int,
-    )
-
-    private class ModuleResult(
-        val item: Any?,
-        val removed: Int = 0,
-    )
+    private fun isPromoted(item: Any?): Boolean =
+        if (promotedUserClass.isInstance(item)) {
+            promotedUserMetadataField.get(item) != null
+        } else {
+            promotedMetadataMethod.invoke(null, item) != null
+        }
 }
+
+private fun Class<*>.instanceFields(): List<Field> =
+    declaredFields.filter { !Modifier.isStatic(it.modifiers) }.onEach { it.isAccessible = true }

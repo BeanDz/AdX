@@ -1,54 +1,68 @@
 package dev.doji.adx
 
-import android.os.SystemClock
 import android.util.Log
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.ModuleLoadedParam
 import io.github.libxposed.api.XposedModuleInterface.PackageReadyParam
+import org.luckypray.dexkit.DexKitBridge
+import org.luckypray.dexkit.result.ClassData
+import java.lang.reflect.Modifier
 
-/** Removes promoted content from X without modifying the target APK. */
+private const val TARGET_PACKAGE = "com.twitter.android"
+
 class AdXModule : XposedModule() {
-    private var processName = ""
-
     override fun onModuleLoaded(param: ModuleLoadedParam) {
-        processName = param.processName
-        info("Loaded in $processName using $frameworkName API $apiVersion")
-        if (processName != TARGET_PACKAGE) detach()
+        if (param.processName != TARGET_PACKAGE) detach()
     }
 
     override fun onPackageReady(param: PackageReadyParam) {
-        if (processName != TARGET_PACKAGE ||
-            param.packageName != TARGET_PACKAGE ||
-            !param.isFirstPackage
-        ) {
-            return
+        if (param.packageName != TARGET_PACKAGE || !param.isFirstPackage) return
+
+        System.loadLibrary("dexkit")
+        DexKitBridge.create(param.applicationInfo.sourceDir).use { bridge ->
+            val loader = param.classLoader
+            val module = bridge.modelClass("UrtTimelineModule(innerContent=")
+            val wrapper = bridge.modelClass("UrtTimelineModuleItem(item=")
+            val user = bridge.modelClass("UrtTimelineUser(user=")
+            val metadata = bridge.modelClass("TimelinePromotedMetadata(impressionId=")
+            val accessor =
+                bridge
+                    .findMethod {
+                        matcher {
+                            modifiers(Modifier.STATIC)
+                            paramTypes(module.interfaces.single().name)
+                            returnType(metadata.name)
+                        }
+                    }.single()
+            // Both update paths call this after merging cached items.
+            val listMethod =
+                bridge
+                    .findMethod {
+                        matcher {
+                            returnType("java.util.List")
+                            usingEqStrings(
+                                "x_sports_post_context_enabled",
+                                "x_sports_post_context_min_spacing",
+                                "x_sports_post_context_same_game_min_spacing",
+                            )
+                        }
+                    }.single()
+                    .getMethodInstance(loader)
+            val filter =
+                TimelineFilter(
+                    moduleClass = module.getInstance(loader),
+                    moduleItemClass = wrapper.getInstance(loader),
+                    promotedUserClass = user.getInstance(loader),
+                    promotedMetadataMethod = accessor.getMethodInstance(loader),
+                )
+
+            hook(listMethod).intercept { chain -> filter.filter(chain.proceed() as List<*>) }
+            log(Log.INFO, "AdX", "Installed URT list hook: $listMethod")
         }
-
-        try {
-            val started = SystemClock.elapsedRealtime()
-            val symbols = TimelineDiscovery.discover(param.applicationInfo.sourceDir)
-            val binding = TimelineBinding(param.classLoader, symbols)
-            info("Discovered and validated timeline binding in ${SystemClock.elapsedRealtime() - started} ms")
-            installXTimelineHook(binding)
-        } catch (error: Throwable) {
-            error("Timeline binding unavailable; filtering is inactive for this APK", error)
-        }
-    }
-
-    internal fun info(message: String) = log(Log.INFO, TAG, message)
-
-    internal fun warn(
-        message: String,
-        error: Throwable,
-    ) = log(Log.WARN, TAG, message, error)
-
-    private fun error(
-        message: String,
-        error: Throwable,
-    ) = log(Log.ERROR, TAG, message, error)
-
-    private companion object {
-        const val TAG = "AdX"
-        const val TARGET_PACKAGE = "com.twitter.android"
     }
 }
+
+private fun DexKitBridge.modelClass(marker: String): ClassData =
+    findClass {
+        matcher { usingEqStrings(marker) }
+    }.single()
