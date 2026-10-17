@@ -16,37 +16,22 @@ internal class TimelineFilter(
         }
     private val promotedUserMetadataField =
         promotedUserClass.instanceFields().single { it.type == promotedMetadataMethod.returnType }
-    private val moduleFields = moduleClass.instanceFields()
-    private val moduleContentField = moduleFields.single { it.type == List::class.java }
-    private val moduleConstructor =
-        moduleClass.declaredConstructors
-            .single { constructor ->
-                constructor.parameterTypes.all { type -> moduleFields.any { it.type == type } }
-            }.apply { isAccessible = true }
-    private val moduleConstructorFields =
-        moduleConstructor.parameterTypes.map { type -> moduleFields.single { it.type == type } }
+    private val moduleContentField =
+        moduleClass.instanceFields().single { it.type == List::class.java }
 
     init {
         promotedMetadataMethod.isAccessible = true
     }
 
-    fun filter(source: List<*>): List<*> =
-        source.mapNotNull { item ->
-            if (isPromoted(item)) return@mapNotNull null
-            if (!moduleClass.isInstance(item)) return@mapNotNull item
+    fun filter(source: List<*>): List<*> = source.filterNot(::isPromotedItem)
 
-            val content = moduleContentField.get(item) as List<*>
-            val filtered = content.filterNot { isPromoted(moduleItemField.get(it)) }
-            if (filtered.size == content.size) return@mapNotNull item
-            if (filtered.isEmpty()) return@mapNotNull null
-
-            moduleConstructor.newInstance(
-                *moduleConstructorFields
-                    .map { field ->
-                        if (field == moduleContentField) filtered else field.get(item)
-                    }.toTypedArray(),
-            )
-        }
+    // Drop the whole module instead of rebuilding it when one of its entries is promoted.
+    private fun isPromotedItem(item: Any?): Boolean {
+        if (isPromoted(item)) return true
+        if (!moduleClass.isInstance(item)) return false
+        val content = moduleContentField.get(item) as List<*>
+        return content.any { isPromoted(moduleItemField.get(it)) }
+    }
 
     private fun isPromoted(item: Any?): Boolean =
         if (promotedUserClass.isInstance(item)) {

@@ -16,7 +16,7 @@ class AdXModule : XposedModule() {
     }
 
     override fun onPackageReady(param: PackageReadyParam) {
-        if (param.packageName != TARGET_PACKAGE || !param.isFirstPackage) return
+        if (param.packageName != TARGET_PACKAGE) return
 
         System.loadLibrary("dexkit")
         DexKitBridge.create(param.applicationInfo.sourceDir).use { bridge ->
@@ -34,7 +34,7 @@ class AdXModule : XposedModule() {
                             returnType(metadata.name)
                         }
                     }.single()
-            // Both update paths call this after merging cached items.
+            // URT applies this to the merged timeline list before rendering.
             val listMethod =
                 bridge
                     .findMethod {

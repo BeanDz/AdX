@@ -1,7 +1,6 @@
 package dev.doji.adx
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertThrows
 import org.junit.Test
@@ -33,35 +32,12 @@ class TimelineFilterTest {
     }
 
     @Test
-    fun `copies mixed modules and preserves other fields and retained wrappers`() {
-        val post = ModuleItem(Post(null), true)
-        val user = ModuleItem(User(null), false)
-        val promotedPost = ModuleItem(Post(Metadata()), false)
-        val promotedUser = ModuleItem(User(Metadata()), true)
-        val content = listOf(promotedPost, post, promotedUser, user)
-        val module = Module(content, 42, "recommendations")
-
-        val result = filter.filter(listOf(module)).single() as Module
-
-        assertNotSame(module, result)
-        assertEquals(listOf(post, user), result.content)
-        assertEquals(module.id, result.id)
-        assertEquals(module.label, result.label)
-        assertEquals(2, result.cachedContentSize)
-        assertSame(content, module.content)
-        assertEquals(listOf(promotedPost, post, promotedUser, user), module.content)
-        assertEquals(4, module.cachedContentSize)
-    }
-
-    @Test
-    fun `removes all promoted modules and reuses unchanged modules`() {
+    fun `drops modules containing promoted items and reuses unchanged modules`() {
         val promoted =
             Module(
-                listOf(ModuleItem(Post(Metadata()), false), ModuleItem(User(Metadata()), false)),
-                1,
-                "promoted",
+                listOf(ModuleItem(Post(Metadata())), ModuleItem(User(Metadata()))),
             )
-        val ordinary = Module(listOf(ModuleItem(Post(null), true)), 2, "ordinary")
+        val ordinary = Module(listOf(ModuleItem(Post(null))))
 
         val result = filter.filter(listOf(promoted, ordinary))
 
@@ -70,13 +46,21 @@ class TimelineFilterTest {
     }
 
     @Test
+    fun `drops a mixed module instead of only its promoted entries`() {
+        val organic = ModuleItem(Post(null))
+        val promoted = ModuleItem(Post(Metadata()))
+        val module = Module(listOf(organic, promoted))
+
+        assertEquals(emptyList<Any>(), filter.filter(listOf(module)))
+        assertEquals(listOf(organic, promoted), module.content)
+    }
+
+    @Test
     fun `propagates accessor failures without mutating source modules`() {
         val failure = IllegalStateException("metadata unavailable")
         val module =
             Module(
-                listOf(ModuleItem(Post(Metadata()), false), ModuleItem(FailedItem(failure), false)),
-                3,
-                "failed",
+                listOf(ModuleItem(Post(null)), ModuleItem(FailedItem(failure))),
             )
         val source = listOf(module)
         val content = module.content
@@ -87,7 +71,6 @@ class TimelineFilterTest {
         assertSame(module, source.single())
         assertSame(content, module.content)
         assertEquals(2, module.content.size)
-        assertEquals(2, module.cachedContentSize)
     }
 
     private interface Item
@@ -108,16 +91,11 @@ class TimelineFilterTest {
 
     private class ModuleItem(
         val item: Item,
-        val flag: Boolean,
     )
 
     private class Module(
         val content: List<ModuleItem>,
-        val id: Long,
-        val label: String,
-    ) : Item {
-        val cachedContentSize = content.size
-    }
+    ) : Item
 
     companion object {
         @JvmStatic
