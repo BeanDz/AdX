@@ -1,2 +1,15 @@
 [tools]
-java = "temurin-21.0.12+101.0.LTS"
+java = "temurin-27.0.0+35"
+ktlint = "1.8.0"
+
+[tasks.build]
+run = "./gradlew :app:assembleRelease"
+
+[tasks.format]
+run = "ktlint --format '**/*.{kt,kts}' '!**/build/**'"
+
+[tasks.check]
+run = [
+    "ktlint '**/*.{kt,kts}' '!**/build/**'",
+    "./gradlew :app:test :app:lintRelease",
+]
