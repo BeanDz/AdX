@@ -5,8 +5,7 @@ import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.ModuleLoadedParam
 import io.github.libxposed.api.XposedModuleInterface.PackageReadyParam
 import org.luckypray.dexkit.DexKitBridge
-import org.luckypray.dexkit.result.ClassData
-import java.lang.reflect.Modifier
+import java.lang.reflect.Field
 
 private const val TARGET_PACKAGE = "com.twitter.android"
 
@@ -21,25 +20,35 @@ class AdXModule : XposedModule() {
         System.loadLibrary("dexkit")
         DexKitBridge.create(param.applicationInfo.sourceDir).use { bridge ->
             val loader = param.classLoader
-            val module = bridge.modelClass("UrtTimelineModule(innerContent=")
-            val wrapper = bridge.modelClass("UrtTimelineModuleItem(item=")
-            val user = bridge.modelClass("UrtTimelineUser(user=")
-            val metadata = bridge.modelClass("TimelinePromotedMetadata(impressionId=")
-            val accessor =
+
+            fun modelClass(marker: String): Class<*> =
+                bridge
+                    .findClass { matcher { usingEqStrings(marker) } }
+                    .single()
+                    .getInstance(loader)
+
+            val moduleClass = modelClass("UrtTimelineModule(innerContent=")
+            val itemType = moduleClass.interfaces.single()
+            val moduleContentField = moduleClass.fieldOfType(List::class.java)
+            val moduleItemField = modelClass("UrtTimelineModuleItem(item=").fieldOfType(itemType)
+            val userClass = modelClass("UrtTimelineUser(user=")
+            val metadataClass = modelClass("TimelinePromotedMetadata(impressionId=")
+            val userMetadataField = userClass.fieldOfType(metadataClass)
+            val metadataMethod =
                 bridge
                     .findMethod {
                         matcher {
-                            modifiers(Modifier.STATIC)
-                            paramTypes(module.interfaces.single().name)
-                            returnType(metadata.name)
+                            paramTypes(itemType)
+                            returnType(metadataClass)
                         }
                     }.single()
+                    .getMethodInstance(loader)
             // URT applies this to the merged timeline list before rendering.
             val listMethod =
                 bridge
                     .findMethod {
                         matcher {
-                            returnType("java.util.List")
+                            returnType(List::class.java)
                             usingEqStrings(
                                 "x_sports_post_context_enabled",
                                 "x_sports_post_context_min_spacing",
@@ -48,21 +57,28 @@ class AdXModule : XposedModule() {
                         }
                     }.single()
                     .getMethodInstance(loader)
-            val filter =
-                TimelineFilter(
-                    moduleClass = module.getInstance(loader),
-                    moduleItemClass = wrapper.getInstance(loader),
-                    promotedUserClass = user.getInstance(loader),
-                    promotedMetadataMethod = accessor.getMethodInstance(loader),
-                )
 
-            hook(listMethod).intercept { chain -> filter.filter(chain.proceed() as List<*>) }
+            fun isPromoted(item: Any?): Boolean =
+                if (userClass.isInstance(item)) {
+                    userMetadataField.get(item) != null
+                } else {
+                    metadataMethod.invoke(null, item) != null
+                }
+
+            // Drop the whole module instead of rebuilding it when one of its entries is promoted.
+            fun isPromotedItem(item: Any?): Boolean {
+                if (isPromoted(item)) return true
+                if (!moduleClass.isInstance(item)) return false
+                val content = moduleContentField.get(item) as List<*>
+                return content.any { isPromoted(moduleItemField.get(it)) }
+            }
+
+            hook(listMethod).intercept { chain ->
+                (chain.proceed() as List<*>).filterNot(::isPromotedItem)
+            }
             log(Log.INFO, "AdX", "Installed URT list hook: $listMethod")
         }
     }
 }
 
-private fun DexKitBridge.modelClass(marker: String): ClassData =
-    findClass {
-        matcher { usingEqStrings(marker) }
-    }.single()
+private fun Class<*>.fieldOfType(type: Class<*>): Field = declaredFields.single { it.type == type }

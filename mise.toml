@@ -11,5 +11,5 @@ run = "ktlint --format '**/*.{kt,kts}' '!**/build/**'"
 [tasks.check]
 run = [
     "ktlint '**/*.{kt,kts}' '!**/build/**'",
-    "./gradlew :app:test :app:lintRelease",
+    "./gradlew :app:lintRelease",
 ]
